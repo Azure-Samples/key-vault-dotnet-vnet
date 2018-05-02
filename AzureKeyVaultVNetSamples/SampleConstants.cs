@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Net;
+using Microsoft.Azure.Management.Network.Fluent.Models;
 
 namespace AzureKeyVaultVNetSamples
 {
@@ -19,12 +20,16 @@ namespace AzureKeyVaultVNetSamples
             // coordinates of the AD application used to access/manage the vault
             public static readonly string VaultMgmtAppId = "ApplicationId";
             public static readonly string VaultMgmtAppSecret = "ApplicationSecret";
+            public static readonly string VaultAccessorOId = "ObjectId";
 
             // coordinates of virtual network
-            public static readonly string VNetName = "VNetName";
-            public static readonly string VNetResourceId = "VNetResourceId";
-            public static readonly string VNetSubnetName = "VNetSubnetName";
+            public static readonly string VNetSubnetResourceId = "VNetSubnetResourceId";
         }
+
+        // VNet constants
+        public static readonly string VNetAddressSpace = "10.0.0.0/16";         // sample vnet ip address space
+        public static readonly string VNetSubnetAddressSpace = "10.0.0.0/24";   // sample subnet ip address space
+        public static readonly string IpV4Address = "192.168.1.1";              // sample ip address
 
         /// <summary>
         /// Predetermined policies for retrying KeyVault-bound requests.

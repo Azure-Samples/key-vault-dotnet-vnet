@@ -12,7 +12,7 @@ namespace AzureKeyVaultVNetSamples
 
             // run vnet samples
             Console.WriteLine("\n\n** Running Key Vault VNet access rule management sample..");
-            Task.Run(() => KeyVaultVNetSample.DemonstrateVNetAccessRuleManagementAsync()).ConfigureAwait(false).GetAwaiter().GetResult();
+            Task.Run(() => KeyVaultVNetSample.DemonstrateNetworkAccessRuleManagementAsync()).ConfigureAwait(false).GetAwaiter().GetResult();
         }
     }
 }

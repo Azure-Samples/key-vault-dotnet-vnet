@@ -10,6 +10,8 @@ using Microsoft.Azure.Management.KeyVault;
 using Microsoft.Azure.Management.KeyVault.Models;
 using Microsoft.Rest;
 using Microsoft.Rest.Azure;
+using Microsoft.Azure.Management.Network.Fluent;
+using Microsoft.Azure.Management.Network.Fluent.Models;
 
 namespace AzureKeyVaultVNetSamples
 {
@@ -26,12 +28,17 @@ namespace AzureKeyVaultVNetSamples
         /// <summary>
         /// KeyVault management (Control Plane) client instance.
         /// </summary>
-        public KeyVaultManagementClient ManagementClient { get; private set; }
+        public KeyVaultManagementClient KVManagementClient { get; private set; }
 
         /// <summary>
         /// KeyVault data (Data Plane) client instance.
         /// </summary>
         public KeyVaultClient DataClient { get; private set; }
+
+        /// <summary>
+        /// Networking management (Control Plane) client instance.
+        /// </summary>
+        public NetworkManagementClient NetworkManagementClient { get; private set; } 
 
         /// <summary>
         /// Builds a sample object from the specified parameters.
@@ -40,12 +47,12 @@ namespace AzureKeyVaultVNetSamples
         /// <param name="appId">AAD application id.</param>
         /// <param name="appSecret">AAD application secret.</param>
         /// <param name="subscriptionId">Subscription id.</param>
-        /// <param name="resourceGroupName">Resource group name.</param>
+        /// <param name="vaultResourceGroupName">Resource group name.</param>
         /// <param name="vaultLocation">Vault location.</param>
         /// <param name="vaultName">Vault name.</param>
-        public KeyVaultSampleBase(string tenantId, string appId, string appSecret, string subscriptionId, string resourceGroupName, string vaultLocation, string vaultName)
+        public KeyVaultSampleBase(string tenantId, string appId, string appSecret, string objectId, string subscriptionId, string vaultResourceGroupName, string vaultLocation, string vaultName, string vnetSubnetResourceId)
         {
-            InstantiateSample(tenantId, appId, appSecret, subscriptionId, resourceGroupName, vaultLocation, vaultName);
+            InstantiateSample(tenantId, appId, appSecret, objectId, subscriptionId, vaultResourceGroupName, vaultLocation, vaultName, vnetSubnetResourceId);
         }
 
         /// <summary>
@@ -58,26 +65,45 @@ namespace AzureKeyVaultVNetSamples
             var appSecret = ConfigurationManager.AppSettings[SampleConstants.ConfigKeys.VaultMgmtAppSecret];
             var appId = ConfigurationManager.AppSettings[SampleConstants.ConfigKeys.VaultMgmtAppId];
             var subscriptionId = ConfigurationManager.AppSettings[SampleConstants.ConfigKeys.SubscriptionId];
-            var resourceGroupName = ConfigurationManager.AppSettings[SampleConstants.ConfigKeys.ResourceGroupName];
+            var objectId = ConfigurationManager.AppSettings[SampleConstants.ConfigKeys.VaultAccessorOId];
+            var vaultRGName = ConfigurationManager.AppSettings[SampleConstants.ConfigKeys.ResourceGroupName];
             var vaultLocation = ConfigurationManager.AppSettings[SampleConstants.ConfigKeys.VaultLocation];
             var vaultName = ConfigurationManager.AppSettings[SampleConstants.ConfigKeys.VaultName];
-
-            InstantiateSample(tenantId, appId, appSecret, subscriptionId, resourceGroupName, vaultLocation, vaultName);
+            var vnetSubnetResourceId = ConfigurationManager.AppSettings[SampleConstants.ConfigKeys.VNetSubnetResourceId];
+            
+            InstantiateSample(tenantId, appId, appSecret, objectId, subscriptionId, vaultRGName, vaultLocation, vaultName, vnetSubnetResourceId);
         }
 
-        private void InstantiateSample(string tenantId, string appId, string appSecret, string subscriptionId, string resourceGroupName, string vaultLocation, string vaultName)
+        /// <summary>
+        /// Instantiates the base sample class, creating the service clients. 
+        /// </summary>
+        /// <param name="tenantId">Tenant identifier which contains the Service Principal used to run this test.</param>
+        /// <param name="appId">Identifier of the AD application used to log into Azure.</param>
+        /// <param name="appSecret">Secret of the AD application.</param>
+        /// <param name="objectId">Object identifier of the Service Principal corresponding to the AD application used to run this test.</param>
+        /// <param name="subscriptionId">Subscription containing the resources.</param>
+        /// <param name="vaultResourceGroupName">Vault resource group name.</param>
+        /// <param name="vaultLocation">Vault location.</param>
+        /// <param name="vaultName">Vault name.</param>
+        /// <param name="vnetSubnetResourceId">Resource identifier of the subnet to use for testing; 
+        /// all other coordinates are derived from this resource id.</param>
+        private void InstantiateSample(string tenantId, string appId, string appSecret, string objectId, string subscriptionId, string vaultResourceGroupName, string vaultLocation, string vaultName, string vnetSubnetResourceId)
         {
-            context = ClientContext.Build(tenantId, appId, appSecret, subscriptionId, resourceGroupName, vaultLocation, vaultName);
+            context = ClientContext.Build(tenantId, appId, appSecret, objectId, subscriptionId, vaultResourceGroupName, vaultLocation, vaultName, vnetSubnetResourceId);
 
             // log in with as the specified service principal for vault management operations
             var serviceCredentials = Task.Run(() => ClientContext.GetServiceCredentialsAsync(tenantId, appId, appSecret)).ConfigureAwait(false).GetAwaiter().GetResult();
 
             // instantiate the management client
-            ManagementClient = new KeyVaultManagementClient(serviceCredentials);
-            ManagementClient.SubscriptionId = subscriptionId;
+            KVManagementClient = new KeyVaultManagementClient(serviceCredentials);
+            KVManagementClient.SubscriptionId = subscriptionId;
 
             // instantiate the data client
             DataClient = new KeyVaultClient(ClientContext.AcquireAccessTokenAsync);
+
+            // instantiate the network management client
+            NetworkManagementClient = new NetworkManagementClient(serviceCredentials);
+            NetworkManagementClient.SubscriptionId = context.SubscriptionId;
         }
 
         #region utilities
@@ -104,10 +130,38 @@ namespace AzureKeyVaultVNetSamples
                 CreateMode = CreateMode.Default
             };
 
-            // accessing managed storage account functionality requires a user identity
-            // since the login would have to be interactive, it is acceptable to expect that
-            // the user has been granted the required roles and permissions in preamble.
+            // add an access control entry for the test SP
+            properties.AccessPolicies.Add(new AccessPolicyEntry
+            {
+                TenantId = properties.TenantId,
+                ObjectId = context.VaultAccessorObjectId,
+                Permissions = new Permissions
+                {
+                    Secrets = new string[] { "get", "set", "list", "delete", "recover", "backup", "restore", "purge" },
+                }
+            });
+
             return new VaultCreateOrUpdateParameters(vaultLocation, properties);
+        }
+
+        protected VirtualNetworkInner CreateVNetParameters(string vnetName, string vnetAddressSpace, string subnetName, string subnetAddressSpace)
+        {
+            return new VirtualNetworkInner(
+                location: context.PreferredLocation,
+                id: null,
+                name: vnetName,
+                type: null,
+                tags: null,
+                addressSpace: new AddressSpace(new List<string> { SampleConstants.VNetAddressSpace } ),
+                dhcpOptions: null,
+                subnets: new List<SubnetInner> { new SubnetInner(subnetName, subnetAddressSpace) },
+                virtualNetworkPeerings: null,
+                resourceGuid: null,
+                provisioningState: null,
+                enableDdosProtection: null,
+                enableVmProtection: null,
+                ddosProtectionPlan: null,
+                etag: null);
         }
 
         protected async Task<Vault> CreateOrRetrieveVaultAsync(string resourceGroupName, string vaultName, bool enableSoftDelete, bool enablePurgeProtection)
@@ -118,83 +172,138 @@ namespace AzureKeyVaultVNetSamples
             {
                 // check whether the vault exists
                 Console.Write("Checking the existence of the vault...");
-                vault = await ManagementClient.Vaults.GetAsync(resourceGroupName, vaultName).ConfigureAwait(false);
+                vault = await KVManagementClient.Vaults.GetAsync(resourceGroupName, vaultName).ConfigureAwait(false);
                 Console.WriteLine("done.");
             }
-            catch (CloudException ce)
+            catch (Exception e)
             {
-                if (ce.Response.StatusCode != HttpStatusCode.NotFound)
-                {
-                    Console.WriteLine("Unexpected exception encountered retrieving the vault: {0}", ce.Message);
-                    throw;
-                }
+                VerifyExpectedException<CloudException>(e, HttpStatusCode.NotFound, (ex) => { return ex.Response.StatusCode; });
+            }
 
+            if (vault == null)
+            { 
                 // create a new vault
                 var vaultParameters = CreateVaultParameters(resourceGroupName, vaultName, context.PreferredLocation, enableSoftDelete, enablePurgeProtection);
 
-                // create new soft-delete-enabled vault
-                Console.Write("Vault does not exist; creating...");
-                vault = await ManagementClient.Vaults.CreateOrUpdateAsync(resourceGroupName, vaultName, vaultParameters).ConfigureAwait(false);
-                Console.WriteLine("done.");
+                try
+                {
+                    // create new soft-delete-enabled vault
+                    Console.Write("Vault does not exist; creating...");
+                    vault = await KVManagementClient.Vaults.CreateOrUpdateAsync(resourceGroupName, vaultName, vaultParameters).ConfigureAwait(false);
+                    Console.WriteLine("done.");
 
-                // wait for the DNS record to propagate; verify properties
-                Console.Write("Waiting for DNS propagation..");
-                Thread.Sleep(10 * 1000);
-                Console.WriteLine("done.");
+                    // wait for the DNS record to propagate; verify properties
+                    Console.Write("Waiting for DNS propagation..");
+                    Thread.Sleep(10 * 1000);
+                    Console.WriteLine("done.");
 
-                Console.Write("Retrieving newly created vault...");
-                vault = await ManagementClient.Vaults.GetAsync(resourceGroupName, vaultName).ConfigureAwait(false);
-                Console.WriteLine("done.");
+                    Console.Write("Retrieving newly created vault...");
+                    vault = await KVManagementClient.Vaults.GetAsync(resourceGroupName, vaultName).ConfigureAwait(false);
+                    Console.WriteLine("done.");
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Unexpected exception encountered updating or retrieving the vault: {0}", e.Message);
+                    throw;
+                }
             }
 
             return vault;
         }
 
-        /// <summary>
-        /// Enables soft delete on a pre-existing vault.
-        /// </summary>
-        /// <param name="resourceGroupName"></param>
-        /// <param name="vaultName"></param>
-        /// <returns></returns>
-        public async Task EnableRecoveryOptionsOnExistingVaultAsync(string resourceGroupName, string vaultName, bool enablePurgeProtection)
+        protected async Task<VirtualNetworkInner> CreateOrRetrieveNetworkAsync(string resourceGroupName, string vnetName, string subnetName)
         {
-            var vault = await ManagementClient.Vaults.GetAsync(resourceGroupName, vaultName).ConfigureAwait(false);
+            VirtualNetworkInner vnet = null;
 
-            // First check if there is anything to do. The recovery levels are as follows:
-            // - no protection: soft delete = false
-            // - recoverable deletion: soft delete = true, purge protection = false
-            // - recoverable deletion, purge protected: soft delete = true, purge protection = true
-            //
-            // The protection level can be strengthened, but never weakened; we will throw on an attempt to lower it.
-            // 
-            if (vault.Properties.EnableSoftDelete.HasValue
-                && vault.Properties.EnableSoftDelete.Value)
-            {
-                //if (!(vault.Properties.EnablePurgeProtection ^ enablePurgeProtection))
-                //{
-                Console.WriteLine("The required recovery protection level is already enabled on vault {0}.", vaultName);
-
-                return;
-            }
-
-            vault.Properties.EnableSoftDelete = true;
-
-            // prepare the update operation on the vault
-            var updateParameters = new VaultCreateOrUpdateParameters
-            {
-                Location = vault.Location,
-                Properties = vault.Properties,
-                Tags = vault.Tags
-            };
-
+            // attempt to retrieve an existing vnet
             try
             {
-                vault = await ManagementClient.Vaults.CreateOrUpdateAsync(resourceGroupName, vaultName, updateParameters).ConfigureAwait(false);
+                Console.Write("Checking the existence of vnet '{0}' in resource group '{1}'...", vnetName, resourceGroupName);
+                var vNetResponse = await NetworkManagementClient.VirtualNetworks.GetWithHttpMessagesAsync(resourceGroupName, vnetName).ConfigureAwait(false);
+                Console.WriteLine("done");
+
+                vnet = vNetResponse.Body;
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed to update vault {0} in resource group {1}: {2}", vaultName, resourceGroupName, e.Message);
+                VerifyExpectedException<CloudException>(e, HttpStatusCode.NotFound, (ex) => { return ex.Response.StatusCode; });
             }
+
+            // create one if we must
+            if (vnet == null)
+            {
+                try
+                {
+                    Console.Write("Creating vnet '{0}' in resource group '{1}'...", vnetName, resourceGroupName);
+                    var vNetResponse = await NetworkManagementClient.VirtualNetworks.CreateOrUpdateWithHttpMessagesAsync(
+                        resourceGroupName, 
+                        vnetName, 
+                        CreateVNetParameters(vnetName, SampleConstants.VNetAddressSpace, subnetName, SampleConstants.VNetSubnetAddressSpace))
+                        .ConfigureAwait(false);
+                    Console.WriteLine("done.");
+
+                    vnet = vNetResponse.Body;
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Unexpected exception encountered creating the virtual network: {0}", e.Message);
+                    throw;
+                }
+            }
+
+            // attempt to retrieve the specified subnet; create if not existing
+            var subnetEntry = new SubnetInner()
+            {
+                Name = subnetName,
+                ServiceEndpoints = new List<ServiceEndpointPropertiesFormat> { new ServiceEndpointPropertiesFormat("Microsoft.KeyVault") },
+                AddressPrefix = SampleConstants.VNetSubnetAddressSpace
+            };
+
+            bool hasMatchingSubnet = false;
+            if (vnet.Subnets.Count > 0)
+            {
+                // enumerate existing subnets and look for a match.
+                // Invoking vnet.Subnets.Contains() will only return true
+                // for a complete match of all the properties of the subnet,
+                // some of which we can't know beforehand.
+                for (var subnetIt = vnet.Subnets.GetEnumerator();
+                    subnetIt.MoveNext();
+                    )
+                {
+                    hasMatchingSubnet |= subnetIt.Current.Name.Equals(subnetEntry.Name, StringComparison.InvariantCultureIgnoreCase);
+                    if (hasMatchingSubnet)
+                        break;
+                }
+            }
+
+            if (!hasMatchingSubnet)
+            {
+                try
+                {
+                    Console.Write("Creating subnet '{0}' in resource group '{1}'...", subnetEntry.Name, resourceGroupName);
+                    var subnetResponse = await NetworkManagementClient.Subnets.CreateOrUpdateWithHttpMessagesAsync(
+                        resourceGroupName, 
+                        vnet.Name, 
+                        subnetEntry.Name, 
+                        subnetEntry)
+                        .ConfigureAwait(false);
+                    Console.WriteLine("done.");
+
+                    // retrieve the updated vnet
+                    Console.Write("Retrieving the updated vnet '{0}' in resource group '{1}'...", vnetName, resourceGroupName);
+                    var vNetResponse = await NetworkManagementClient.VirtualNetworks.GetWithHttpMessagesAsync(resourceGroupName, vnetName).ConfigureAwait(false);
+                    Console.WriteLine("done");
+
+                    vnet = vNetResponse.Body;
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Unexpected exception encountered updating the virtual network: {0}", e.Message);
+                    throw;
+                }
+            }
+
+            return vnet;
         }
 
         /// <summary>
@@ -202,20 +311,21 @@ namespace AzureKeyVaultVNetSamples
         /// </summary>
         /// <param name="e"></param>
         /// <param name="expectedStatusCode"></param>
-        protected static void VerifyExpectedARMException(Exception e, HttpStatusCode expectedStatusCode)
+        protected static void VerifyExpectedException<TException>(Exception e, HttpStatusCode expectedStatusCode, Func<TException, HttpStatusCode> errorCodeRetriever)
+            where TException: RestException
         {
             // verify that the exception is a CloudError one
-            var armException = e as Microsoft.Rest.Azure.CloudException;
-            if (armException == null)
+            var expectedException = e as TException;
+            if (expectedException == null)
             {
                 Console.WriteLine("Unexpected exception encountered running sample: {0}", e.Message);
                 throw e;
             }
 
             // verify that the exception has the expected status code
-            if (armException.Response.StatusCode != expectedStatusCode)
+            if (errorCodeRetriever(expectedException) != expectedStatusCode)
             {
-                Console.WriteLine("Encountered unexpected ARM exception; expected status code: {0}, actual: {1}", armException.Response.StatusCode, expectedStatusCode);
+                Console.WriteLine("Encountered unexpected exception; expected status code: {0}, actual: {1}", errorCodeRetriever(expectedException), expectedStatusCode);
                 throw e;
             }
         }

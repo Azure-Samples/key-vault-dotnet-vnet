@@ -51,8 +51,6 @@ To run the demo, follow these steps:
 
 ## Resources
 
-(Any additional resources or related projects)
-
 - Link to supporting information
-- Link to similar sample
+- [Virtual Network Management .Net sample](https://github.com/Azure-Samples/network-dotnet-manage-virtual-network)
 - ...

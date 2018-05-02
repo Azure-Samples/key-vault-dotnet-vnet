@@ -14,39 +14,64 @@ namespace AzureKeyVaultVNetSamples
     {
         private static ClientCredential _servicePrincipalCredential = null;
 
+        static readonly string VNetProvider = "Microsoft.Network";
+        static readonly string VNetType = "virtualNetworks";
+        static readonly string SubnetType = "subnets";
+
         #region construction
-        public static ClientContext Build(string tenantId, string vaultMgmtAppId, string vaultMgmtAppSecret, string subscriptionId, string resourceGroupName, string location, string vaultName)
+        public static ClientContext Build(string tenantId, string vaultMgmtAppId, string vaultMgmtAppSecret, string objectId, string subscriptionId, string vaultResourceGroupName, string location, string vaultName, string vnetSubnetResourceId)
         {
             if (String.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException(nameof(tenantId));
             if (String.IsNullOrWhiteSpace(vaultMgmtAppId)) throw new ArgumentException(nameof(vaultMgmtAppId));
             if (String.IsNullOrWhiteSpace(vaultMgmtAppSecret)) throw new ArgumentException(nameof(vaultMgmtAppSecret));
+            if (String.IsNullOrWhiteSpace(objectId)) throw new ArgumentException(nameof(objectId));
             if (String.IsNullOrWhiteSpace(subscriptionId)) throw new ArgumentException(nameof(subscriptionId));
-            if (String.IsNullOrWhiteSpace(resourceGroupName)) throw new ArgumentException(nameof(resourceGroupName));
+            if (String.IsNullOrWhiteSpace(vaultResourceGroupName)) throw new ArgumentException(nameof(vaultResourceGroupName));
+            if (String.IsNullOrWhiteSpace(vnetSubnetResourceId)) throw new ArgumentException(nameof(vnetSubnetResourceId));
+
+            var subnetResId = new AzureResourceIdentifier(vnetSubnetResourceId);
+            if (!ValidateResourceIsVNetOrSubnet(subnetResId))
+                throw new ArgumentException("the specified resource identifier is not a valid virtual network or subnet");
 
             return new ClientContext
             {
                 TenantId = tenantId,
                 VaultMgmtApplicationId = vaultMgmtAppId,
+                VaultAccessorObjectId = objectId,
                 SubscriptionId = subscriptionId,
-                ResourceGroupName = resourceGroupName,
+                VaultResourceGroupName = vaultResourceGroupName,
                 PreferredLocation = location ?? "southcentralus",
                 VaultName = vaultName ?? "keyvaultsample",
+                VNetName = subnetResId.Name,
+                SubnetName = subnetResId.ChildName,
+                VNetResourceGroupName = subnetResId.ResourceGroup,
+                SubnetResourceId = vnetSubnetResourceId
             };
         }
         #endregion
 
         #region properties
-        public string TenantId { get; set; }
+        public string TenantId { get; private set; }
 
-        public string VaultMgmtApplicationId { get; set; }
+        public string VaultMgmtApplicationId { get; private set; }
 
-        public string SubscriptionId { get; set; }
+        public string VaultAccessorObjectId { get; private set; }
 
-        public string PreferredLocation { get; set; }
+        public string SubscriptionId { get; private set; }
 
-        public string VaultName { get; set; }
+        public string PreferredLocation { get; private set; }
 
-        public string ResourceGroupName { get; set; }
+        public string VaultName { get; private set; }
+
+        public string VaultResourceGroupName { get; private set; }
+
+        public string VNetResourceGroupName { get; private set; }
+
+        public string VNetName { get; private set; }
+
+        public string SubnetName { get; private set; }
+
+        public string SubnetResourceId { get; private set; }
         #endregion
 
         #region authentication helpers
@@ -87,5 +112,13 @@ namespace AzureKeyVaultVNetSamples
             return result.AccessToken;
         }
         #endregion
+
+        private static bool ValidateResourceIsVNetOrSubnet(AzureResourceIdentifier resourceId)
+        {
+            return resourceId.Provider.Equals(VNetProvider, StringComparison.InvariantCultureIgnoreCase)
+                && resourceId.Type.Equals(VNetType, StringComparison.InvariantCultureIgnoreCase)
+                && (String.IsNullOrWhiteSpace(resourceId.ChildType)
+                    || resourceId.ChildType.Equals(SubnetType, StringComparison.InvariantCultureIgnoreCase));
+        }
     }
 }
