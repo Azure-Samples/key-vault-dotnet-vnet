@@ -1,40 +1,41 @@
-# Project Name
+---
+services: key-vault
+platforms: dotnet
+author: dragav
+---
 
-(short, 1-3 sentenced, description of the project)
+# .Net SDK sample illustrating virtual network-based management of access policies for Azure key vaults.  
 
-## Features
+This repo contains sample code demonstrating the management of access policies for Azure key vault, restricting access to clients from specific virtual networks, using the [Azure .Net SDK](https://docs.microsoft.com/en-us/dotnet/api/overview/azure/key-vault?view=azure-dotnet). The scenarios covered by these samples include:
 
-This project framework provides the following features:
+* Setting up, retrieving and deleting vnet access rules
 
-* Feature 1
-* Feature 2
-* ...
 
 ## Getting Started
 
 ### Prerequisites
 
-(ideally very short, if any)
-
-- OS
-- Library version
-- ...
-
+- OS: Windows
+- SDKs:
+    - KeyVault data SDK: Microsoft.Azure.KeyVault ver. 3.0.0+
+- Azure:
+    - an active Azure subscription, in which you have the Key Vault Contributor role
+	- an Azure key vault
+    - an Azure Active Directory application, created in the tenant associated with the subscription, and with access to KeyVault; please see [Accessing Key Vault from a native application](https://blogs.technet.microsoft.com/kv/2016/09/17/accessing-key-vault-from-a-native-application) for details.
+    - the credentials of the AAD application, in the form of a client secret
+    - an Azure Virtual Network, with a subnet configured to allow Azure Key Vault as a service endpoint; please see [Azure Virtual Network - Service Endpoint overview](https://docs.microsoft.com/en-us/azure/virtual-network/virtual-network-service-endpoints-overview) for more details.
+  
 ### Installation
 
-(ideally very short)
-
-- npm install [package name]
-- mvn install
-- ...
+- open the solution in Visual Studio - NuGet should resolve the necessary packages
 
 ### Quickstart
-(Add steps to get up and running quickly)
+Follow these steps to get started with this sample:
 
-1. git clone [repository clone url]
-2. cd [respository name]
-3. ...
-
+1. git clone https://github.com/Azure-Samples/key-vault-dotnet-vnet.git
+2. cd key-vault-dotnet-vnet
+4. edit the app.config file, specifying the tenant, subscription, AD app id and secret, and storage account and its resource id
+5. dotnet run --project AzureKeyVaultVNetSamples\AzureKeyVaultVNetSamples.csproj
 
 ## Demo
 
@@ -50,8 +51,6 @@ To run the demo, follow these steps:
 
 ## Resources
 
-(Any additional resources or related projects)
-
 - Link to supporting information
-- Link to similar sample
+- [Virtual Network Management .Net sample](https://github.com/Azure-Samples/network-dotnet-manage-virtual-network)
 - ...
