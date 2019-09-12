@@ -1,7 +1,11 @@
 ---
-services: key-vault
-platforms: dotnet
-author: dragav
+page_type: sample
+languages:
+- csharp
+products:
+- azure
+description: "This repo contains sample code demonstrating the management of access policies for Azure key vault, restricting access to clients from specific virtual networks, using the Azure .Net SDK."
+urlFragment: key-vault-dotnet-vnet
 ---
 
 # .Net SDK sample illustrating virtual network-based management of access policies for Azure key vaults.  
